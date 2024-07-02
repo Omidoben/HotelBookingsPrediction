@@ -1,0 +1,570 @@
+---
+title: "Hotel Bookings - Cancelled Vs Non Cancelled"
+author: "Benard Omido"
+date: "2024-06-27"
+output: html_document
+---
+
+## Objectives:
+
+**1. Predict Customer Cancellations:** Develop a machine learning model to predict         whether a customer will cancel their hotel booking or not.
+
+**2. Data Understanding and Exploration:** Perform exploratory data analysis (EDA) to      understand the distribution and relationships within the dataset.
+
+**3. Data Preprocessing:** Clean and preprocess the data to make it suitable for           modeling.
+
+**4. Model Building and Evaluation:** Fit and evaluate five different machine learning      models: K-Nearest Neighbors (KNN), an untuned Decision Tree, a tuned Decision         Tree, an untuned Random Forest, and a tuned Random Forest.
+
+**5. Model Selection:** Select the best-performing model based on evaluation metrics.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+
+Load the data
+```{r}
+hotel_bookings <- read_csv("hotel_bookings.csv")
+hotel_bookings
+
+glimpse(hotel_bookings)
+```
+
+
+## Description of columns to be used in model building
+
+- lead_time: Longer lead times might increase the likelihood of cancellations.
+- stays_in_weekend_nights: Number of weekend nights booked.
+- stays_in_week_nights: Number of weekday nights booked.
+- adults: Number of adults in the booking.
+- children: Number of children in the booking.
+- babies: Number of babies in the booking.
+- previous_cancellations: Customers with a history of cancellations might be more        likely to cancel again.
+- previous_bookings_not_canceled: This could provide insight into customer loyalty or    reliability.
+- booking_changes: Number of changes made to the booking.
+- days_in_waiting_list: Longer waiting times might influence the likelihood of           cancellations.
+- total_of_special_requests: Could indicate the customer's commitment or specific needs   that might impact cancellations.
+- required_car_parking_spaces: Might be relevant if lack of parking space availability   leads to cancellations.
+- hotel: Type or location of the hotel might influence cancellation rates.
+- meal: Meal plan booked.
+- market_segment: How the booking was made (e.g., direct, corporate).
+- distribution_channel: Through which channel the booking was made.
+- is_repeated_guest: Repeated guests might have different cancellation patterns.
+- reserved_room_type: Type of room reserved.
+- assigned_room_type: Type of room assigned.
+- deposit_type: Deposit policy could affect cancellations (e.g., no deposit,             refundable, non-refundable).
+- customer_type: Type of customer (e.g., transient, group).
+- adr (Average Daily Rate): Higher prices might correlate with cancellations,            especially if customers find better deals elsewhere.
+
+
+## **Exploratory Analysis**
+
+```{r}
+# Check proportions of cancelled vs non cancelled bookings
+hotel_bookings %>% 
+  count(is_canceled) %>% 
+  mutate(prop = n / sum(n))
+```
+
+63% of the people did not cancel their bookings while 37% cancelled their bookings
+
+```{r}
+# Convert outcome variable to a factor
+hotel_cancellations <- hotel_bookings %>% 
+  mutate(is_canceled = case_when(is_canceled == 0 ~ "not cancelled",
+                                 TRUE ~ "cancelled"),
+         is_canceled = factor(is_canceled))
+
+class(hotel_cancellations$is_canceled)
+```
+
+**1. How does the distribution of bookings vary across the hotels?**
+
+```{r}
+hotel_cancellations %>% 
+  count(hotel)
+
+hotel_cancellations %>% 
+  count(is_canceled, hotel) %>%
+  group_by(hotel) %>% 
+  mutate(prop = n / sum(n)) %>%
+  arrange(hotel) %>% 
+  ggplot(aes(hotel, prop, fill = is_canceled)) +
+  geom_col(position = "dodge") +
+  labs(x = "Hotel", y = NULL, fill = NULL, 
+       title = "Percentage of Cancelled vs Non Cancelled Bookings Per Hotel") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_minimal() +
+  theme(axis.text = element_text(color = "black"))
+
+```
+
+Above plot indicate that the City Hotel has a higher percentage of cancelled bookings compared to the Resort Hotel. Specifically, about 41.73% of bookings at the City Hotel are cancelled, while the Resort Hotel experiences a significantly lower cancellation rate of 27.76%.
+
+**2. Does cancellations vary with the number of weekend/week nights booked?**
+
+```{r}
+# Weekend nights booked
+
+hotel_cancellations %>% 
+  count(stays_in_weekend_nights) %>% head()
+
+hotel_cancellations %>% 
+  mutate(stays_in_weekend_nights = case_when(stays_in_weekend_nights > 0 ~ "weekend nights",
+                                             TRUE ~ "None")) %>% 
+  count(stays_in_weekend_nights, is_canceled) %>%
+  group_by(stays_in_weekend_nights) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  ggplot(aes(stays_in_weekend_nights, prop, fill = is_canceled)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "Stays in weekend nights", y = "Proportion", fill = NULL,
+       title = "Do customers who book weekend nights more likely to cancel 
+       their bookings?") +
+  theme_minimal() +
+  theme(axis.text = element_text(color = "black"))
+```
+
+This plot suggest that there is a slight difference in cancellation rates between bookings with and without stays in weekend nights. 
+Focusing on weekend nights only, 36.69% of bookings with weekend nights are cancelled while 63.31% are not.
+
+
+```{r}
+# Week nights booked
+
+hotel_cancellations %>% 
+  count(stays_in_week_nights) %>% head()
+
+hotel_cancellations%>% 
+  mutate(stays_in_week_nights = case_when(stays_in_week_nights > 0 ~ "week nights",
+                                          TRUE ~ "None")) %>% 
+  count(stays_in_week_nights, is_canceled) %>%
+  group_by(stays_in_week_nights) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  ggplot(aes(stays_in_week_nights, prop, fill = is_canceled)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "Stays in week nights", y = "Proportion", fill = NULL,
+       title = "Do customers who book week nights more likely to cancel 
+       their bookings?") +
+  theme_minimal() +
+  theme(axis.text = element_text(color = "black"))
+```
+
+There is a notable difference in cancellation rates based on stays in week nights. 25.02% of bookings without week nights are cancelled, compared to a higher cancellation rate of 37.86% for bookings that include week nights. This suggests that bookings with stays during week nights have a significantly higher likelihood of being cancelled compared to those without any week night stays.
+
+
+```{r}
+hotel_cancellations %>% count(reserved_room_type, is_canceled, sort = TRUE)
+
+
+hotel_cancellations %>% count(market_segment, is_canceled, sort = TRUE)
+```
+
+**3. Does cancellations vary with the total price of a room?**
+
+```{r}
+summary(hotel_cancellations$adr)
+
+# The are negative values in the adr column, which is an anomaly
+
+hotel_cancellations %>% 
+  filter(adr < 0)
+```
+
+```{r}
+ggplot(hotel_cancellations, aes(adr, 
+                           fill = is_canceled)) +
+  geom_histogram(aes(y =  after_stat(count / sum(count))), color = "white") +
+  scale_x_log10() +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "Average Daily Rate", y = "Proportion", fill = NULL,
+       title = "Distribution of Prices for Cancelled / Non Cancelled Bookings") +
+  facet_wrap(~is_canceled) +
+  theme_bw() 
+
+```
+
+The distribution of the average daily rate (ADR) for both cancelled and non-cancelled bookings shows some similarities and differences. The most common ADR for both groups is around 100. However, non-cancelled bookings have a higher peak at this rate compared to cancelled bookings. This indicates that while the overall price distribution is similar, bookings at or around this common ADR of 100 are more likely to be non-cancelled.
+
+**4. How does the distribution of hotel cancellations vary by month in each hotel?**
+
+```{r}
+hotel_cancellations %>% 
+  mutate(arrival_date_month = factor(arrival_date_month, 
+                                     levels = month.name)) %>% 
+  count(arrival_date_month, is_canceled, hotel) %>% 
+  group_by(hotel) %>% 
+  mutate(prop = n / sum(n)) %>%
+  ggplot(aes(arrival_date_month, prop, group = is_canceled)) +
+  geom_line(aes(color = is_canceled)) +
+  facet_wrap(~hotel, nrow = 2) +
+  labs(x = "Arrival date month", y = "Proportion", fill = NULL,
+       title = "Percentage of Cancelled vs Non cancelled Bookings Per Month in each Hotel") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_bw() +
+  theme(axis.text = element_text(color = "black"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+August had the highest proportion of cancelled and non cancelled bookings in both hotels
+
+**5. Do customers who require car parking spaces more likely to cancel their bookings?**
+
+```{r}
+hotel_cancellations %>% 
+  count(required_car_parking_spaces)
+
+hotel_cancellations %>% 
+  mutate(required_car_parking_spaces = case_when(required_car_parking_spaces > 0 ~ "parking",
+                                          TRUE ~ "none")) %>% 
+  count(is_canceled ,required_car_parking_spaces) %>% 
+  arrange(required_car_parking_spaces) %>% 
+  mutate(prop = n / sum(n)) %>% 
+  ggplot(aes(required_car_parking_spaces, prop, fill = is_canceled)) +
+  geom_col(position = "dodge") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(x = "Required car parking space", y = "Proportion", fill = NULL, 
+       title = "Customers who required Car parking spaces didn't cancel their bookings")+
+  theme_minimal() +
+  theme(axis.text = element_text(color = "black"))
+```
+
+Customers who required car parking spaces didn't cancel their bookings
+
+**6. Does cancellations vary with whether one has children?**
+
+```{r}
+hotel_cancellations %>% 
+  mutate(children = case_when(children + babies > 0 ~ "children",
+                              TRUE ~ "none")) %>% 
+  count(children, is_canceled)
+```
+
+**Preparing the data set**
+
+```{r}
+
+hotel_cancellations <- hotel_cancellations %>% 
+  mutate(is_repeated_guest = factor(is_repeated_guest),
+         children = case_when(children + babies > 0 ~ "children",
+                              TRUE ~ "none"),
+         required_car_parking_spaces = case_when(required_car_parking_spaces > 0 ~ "parking",
+                                                 TRUE ~ "none") 
+         ) %>% 
+  select(-c(arrival_date_year, arrival_date_week_number, arrival_date_week_number,
+            country, agent, company, reservation_status, reservation_status_date, babies)) %>% 
+  mutate_if(is.character, factor)
+
+hotel_cancellations
+
+# In this project, I only use a sample of the whole data set to illustrate the model building process, tuning, and model selection
+set.seed(567)
+
+hotel_cancellations <- hotel_cancellations %>% 
+  slice_sample(n = 10000, replace = FALSE)
+
+hotel_cancellations
+```
+
+### **Build a model to predict whether a customer will cancel the booking or not**
+
+Split the data into training and testing sets
+
+```{r}
+hotel_cancellations %>% 
+  count(is_canceled)
+
+set.seed(123)
+
+hotel_splits <- initial_split(hotel_cancellations, strata = is_canceled)
+hotel_splits
+
+hotel_train <- training(hotel_splits)
+hotel_test <- testing(hotel_splits)
+
+hotel_train
+hotel_test
+```
+
+Create a recipe
+
+```{r}
+library(themis)
+
+hotel_train %>% 
+  count(is_canceled)
+
+hotel_recipe <- recipe(is_canceled ~ ., data = hotel_train) %>% 
+  step_downsample(is_canceled) %>%   #Take care of class imbalance first
+  step_normalize(all_numeric_predictors()) %>%      #Normalize all predictors
+  step_dummy(all_nominal_predictors())   #Convert all factors to dummy variables
+
+hotel_recipe
+
+hotel_preproc <- prep(hotel_recipe)
+hotel_preproc
+
+#View the transformed data
+
+bake(hotel_preproc, new_data = NULL)
+```
+
+Create cross validation folds
+
+```{r}
+# Cross validation fold to evaluate model performance
+
+set.seed(234)
+hotel_folds <- vfold_cv(hotel_train, strata = is_canceled)
+hotel_folds
+
+#To save predictions from the assessment set
+
+keep_pred <- control_resamples(save_pred = TRUE, save_workflow = TRUE)
+keep_pred
+
+```
+
+### **Build Models**
+
+```{r}
+# knn model
+
+library(kknn)
+
+knn_model <- nearest_neighbor() %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_model
+
+
+# Decision tree
+
+tree_model <- decision_tree() %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+tree_model
+
+
+# Tuned decision tree model to check if it improves the performance
+
+tree_model_tune <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+tree_model_tune
+
+
+# Random forest model
+
+rf_model <- rand_forest() %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+rf_model
+
+# Tuned Random forest model
+
+rf_model_tune <- rand_forest(mtry = tune(),
+                        trees = 1000,
+                        min_n = tune()) %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+rf_model_tune
+
+```
+
+Create a workflow set that combines the 3 models
+
+```{r}
+# Create a list to store the 3 models
+
+mdls <- list(
+  knn = knn_model,
+  tree_mdl = tree_model,
+  tree_mdl_tune = tree_model_tune,
+  rf_mdl = rf_model,
+  rf_mdl_tune = rf_model_tune
+)
+
+
+# Workflow set
+booking_models <- workflow_set(
+  preproc = list(hotel_recipe),
+  models = mdls
+)
+
+booking_models
+
+```
+
+```{r}
+doParallel::registerDoParallel()
+```
+
+Fit the models using workflow_map
+
+```{r}
+set.seed(345)
+
+booking_res <- workflow_map(booking_models,
+             "tune_grid",
+             resamples = hotel_folds,
+             metrics = metric_set(roc_auc, accuracy, sensitivity, specificity))
+
+booking_res
+
+```
+
+```{r}
+autoplot(booking_res)
+```
+
+The random forest model has the best performance across the four metrics
+
+```{r}
+rank_results(booking_res, rank_metric = "roc_auc")
+```
+
+The untuned random forest model (recipe_rf_mdl) demonstrates the best performance in terms of ROC AUC, achieving a mean ROC AUC score of 0.8890. This indicates that the untuned random forest model is highly effective at distinguishing between cancelled and non-cancelled bookings.
+
+This suggests that, for this particular dataset, tuning the random forest model does not significantly improve its ability to predict booking cancellations compared to the untuned version.
+
+Extract the random forest model workflow set
+
+```{r}
+rf_rs <- booking_res %>% 
+  extract_workflow_set_result("recipe_rf_mdl")
+
+rf_rs
+
+rf_rs %>% collect_metrics()
+```
+
+- An accuracy of 0.8105 indicates that on average, the model correctly predicts         whether a booking will be cancelled or not 81.05% of the time. 
+- The ROC AUC score of 0.8890 suggests that the model has a strong ability to           distinguish between cancelled and non-cancelled bookings.
+- The sensitivity of 0.7541 means that the model correctly identifies 75.41% of the     actual cancellations. This indicates a good performance in detecting cancellations,   which is crucial for minimizing false negatives.
+- The specificity of 0.8437 indicates that the model correctly identifies 84.37% of     the non-cancellations.
+
+**Fit the final model**
+
+```{r}
+# Create a new workflow
+
+rf_wf <- workflow() %>% 
+  add_recipe(hotel_recipe) %>% 
+  add_model(rf_model)
+
+rf_wf
+```
+
+```{r}
+rf_final_fit <- last_fit(rf_wf, hotel_splits)
+
+rf_final_fit %>% collect_metrics()
+```
+
+- The final random forest model correctly predicts whether a booking will be cancelled   or not 82.13% of the time.
+
+- The ROC AUC score of 0.8905 signifies a strong ability of the final model to          distinguish between cancelled and non-cancelled bookings.
+
+- The similarity in performance metrics between the resampled training data and the     test data demonstrates that the random forest model has not overfitted. The model's   strong and consistent performance across both datasets suggests that it generalizes   well to new, unseen data, making it a reliable model for predicting hotel   booking   cancellations. 
+
+```{r}
+# Confusion matrix
+
+rf_final_fit %>% 
+  collect_predictions() %>% 
+  conf_mat(is_canceled, .pred_class)
+
+# 714 bookings were correctly predicted as cancelled. (TP)
+# 1340 bookings were correctly predicted as not cancelled. (TN)
+# 235 bookings were incorrectly predicted as cancelled when they were actually not      cancelled.
+# 212 bookings were incorrectly predicted as not cancelled when they were actually      cancelled.
+
+
+# Performance metrics
+rf_final_fit %>% 
+  collect_predictions() %>% 
+  conf_mat(is_canceled, .pred_class) %>% summary()
+```
+
+- The precision of 0.7524 means that when the model predicts a booking as cancelled,    it is correct 75.24% of the time.
+- The F1 score of 0.7616 indicates a good balance between precision and recall,         suggesting that the model performs well in both identifying cancellations and         minimizing false positives.
+
+Plot an ROC curve to have a comprehensive view of the model's performance
+
+```{r}
+rf_final_fit %>% 
+  collect_predictions() %>% 
+  roc_curve(is_canceled, .pred_cancelled) %>% 
+  autoplot()
+```
+
+
+
+```{r}
+library(vip)
+
+extract_fit_engine(rf_final_fit) %>% 
+  vi() %>% 
+  slice_max(Importance, n = 15) %>% 
+  ggplot(aes(fct_reorder(Variable, Importance), Importance, fill = "blue")) +
+  geom_col() +
+  coord_flip() +
+  labs(y = "Importance", x = NULL, title = "Variable Importance") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  theme(axis.text = element_text(color = "black"))
+
+```
+
+Based on the available data, Lead time, which is the number of days between booking and arrival, is the most important predictor. A higher value indicates that longer lead times strongly influence the prediction of whether a booking will be cancelled or not.
+
+
+## **Conclusion**
+
+The project aimed to develop a predictive model for hotel booking cancellations using a dataset that included various features such as lead time, deposit type, average daily rate (ADR), and others.
+
+- I first conducted initial exploration to understand data distributions,               relationships between variables, and potential patterns related to booking            cancellations.
+
+**Model Selection and Training:**
+
+- Selected multiple classification algorithms, including k-Nearest Neighbors (KNN),     decision trees (both tuned and untuned), and random forest models (both tuned and     untuned).
+- Used cross-validation techniques to train and validate models, ensuring robustness    and generalizability.
+
+**Model Tuning and Evaluation:**
+
+- Employed hyperparameter tuning using grid search or other methods to optimize model   performance for selected algorithms.
+- Evaluated models using metrics such as ROC AUC, accuracy, sensitivity, and            specificity to assess performance during cross-validation.
+- Selected the best-performing model based on comprehensive evaluation across these     metrics.
+
+**Selection of the Best Model:**
+
+- Criteria: Chose the model with the highest ROC AUC as the primary metric,             complemented by accuracy, sensitivity, and specificity.
+
+**Assessment on Test Data:**
+
+- Final Model Fitting: Applied the selected random forest model to the test dataset to   evaluate its performance in real-world scenarios.
+- Performance Metrics: Calculated metrics such as accuracy, ROC AUC, sensitivity, and   specificity on the test data to validate model effectiveness.
+- Comparison: Ensured consistency in model performance between cross-validation         results and test data metrics, indicating model reliability and lack of overfitting.
+
+
+
+
+
+
